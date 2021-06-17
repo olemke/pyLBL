@@ -19,7 +19,7 @@ def download_data(cwd=None):
         cwd: Directory to run the download in.
     """
     base_url = "https://arts.mi.uni-hamburg.de/svn/rt/arts-xml-data/trunk"
-    for url in ["spectroscopy/Hitran/",]:
+    for url in ["spectroscopy/Artscat/",]:
         info("Downloading HITRAN data from {}/{}.".format(base_url, url))
         run(["svn", "co", "-q", "/".join([base_url, url])], stdout=stdout,
             stderr=stderr, check=True, cwd=cwd)
@@ -32,7 +32,7 @@ def load_data():
         Absolute path of the directory containing molecular line data.
     """
     pkg_dir = Path(__file__).parent
-    hitran = pkg_dir / "Hitran"
+    hitran = pkg_dir / "Artscat"
     if not (hitran.exists() and hitran.is_dir()):
         download_data(cwd=str(pkg_dir))
     return str(hitran.absolute())
