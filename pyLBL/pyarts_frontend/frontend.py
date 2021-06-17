@@ -5,6 +5,7 @@ from subprocess import run
 from sys import stderr, stdout
 
 from numpy import asarray
+from scipy.constants import Boltzmann
 
 from pyarts.workspace import Workspace
 
@@ -54,6 +55,7 @@ def configure_workspace(verbosity=0):
     workspace.jacobianOff()
     workspace.Copy(workspace.abs_xsec_agenda, workspace.abs_xsec_agenda__noCIA)
     workspace.AtmosphereSet1D()
+    workspace.stokes_dim = 1
     return workspace
 
 
@@ -63,7 +65,6 @@ class PyArtsGas(object):
         self.formula = formula
         self.workspace = configure_workspace(verbosity=2) if workspace is None else workspace
         self.workspace.abs_speciesSet(species=[formula])
-        self.workspace.ArrayOfIndexSet(self.workspace.abs_species_active, [0])
         self.workspace.abs_lines_per_speciesReadSpeciesSplitCatalog(basename=hitran_directory)
         self.workspace.abs_lines_per_speciesSetCutoff(option="ByLine", value=750.e9)
         self.workspace.ArrayOfArrayOfAbsorptionLinesCreate("abs_lines_per_species_backup")
@@ -91,17 +92,35 @@ class PyArtsGas(object):
         self.workspace.abs_lines_per_speciesCompact()
 
         #Configure the atmosphere.
-        self.workspace.NumericSet(self.workspace.rtp_pressure, pressure)
-        self.workspace.NumericSet(self.workspace.rtp_temperature, temperature)
-        self.workspace.VectorSet(self.workspace.rtp_vmr, asarray([volume_mixing_ratio]))
-        self.workspace.Touch(self.workspace.abs_nlte)
-        self.workspace.AbsInputFromRteScalars()
+        self.workspace.rtp_pressure = pressure
+        self.workspace.rtp_temperature = temperature
+        self.workspace.rtp_vmr = volume_mixing_ratio
+        self.workspace.Touch(self.workspace.rtp_nlte)
 
         #Calculate the absorption coefficient.
+        self.workspace.propmat_clearsky_agenda_checked = 1
         self.workspace.lbl_checkedCalc()
-        self.workspace.abs_xsec_agenda_checkedCalc()
-        self.workspace.abs_xsec_per_speciesInit()
-        self.workspace.abs_xsec_per_speciesAddLines()
+        self.workspace.propmat_clearskyInit()
+
+        self.workspace.propmat_clearskyAddLines()
+
+        # Sparse grid optimization, only worth for high number of frequency
+        # 2x speedup for 32500 frequencies, 6x for 325000
+        # self.workspace.propmat_clearskyAddLines(
+        #     sparse_df=30e9,
+        #     sparse_lim=45e9,
+        #     speedup_option="QuadraticIndependent")
+
+        # If abs_species contains several species, the absorption calculation
+        # can be limited to only calculate the absoprition for a single species
+        # self.workspace.propmat_clearskyAddLines(select_speciestags="H2O")
+
+
         self.workspace.Copy(self.workspace.abs_lines_per_species,
                             self.workspace.abs_lines_per_species_backup)
-        return self.workspace.abs_xsec_per_species.value.copy()[0][:, 0]
+
+        abscoeff = self.workspace.propmat_clearsky.value.data.data.copy()[0, 0, :, 0]
+
+        # Convert absorption coefficients to crosssections
+        return abscoeff / (pressure * volume_mixing_ratio / temperature /
+                           Boltzmann)
